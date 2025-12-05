@@ -21,9 +21,12 @@ import { initCustom } from './envelope-overrides/envelope-init';
 
 declare const acquireVsCodeApi: any;
 
+const vscodeApi = acquireVsCodeApi();
+(window as any).vscode = vscodeApi;
+
 void initCustom({
 	container: document.getElementById('envelope-app')!,
-	bus: acquireVsCodeApi(),
+	bus: vscodeApi,
 	apiImplFactory: {
 		create: (createArgs) => new KogitoEditorEnvelopeApiImpl(createArgs, new KaotoEditorFactory()),
 	},

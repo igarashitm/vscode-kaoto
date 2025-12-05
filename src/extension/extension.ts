@@ -104,6 +104,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	contextHandler.registerDeploymentsRouteCommands(); // Stop/Start/Resume/Suspend route level buttons
 
 	/*
+	 * register AI chat toggle command
+	 */
+	contextHandler.registerAIChatToggle();
+
+	/*
 	 * send extension startup event into Red Hat Telemetry
 	 */
 	await telemetryService.sendStartupEvent();

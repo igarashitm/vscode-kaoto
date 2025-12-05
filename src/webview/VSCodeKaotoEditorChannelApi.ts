@@ -35,7 +35,6 @@ export class VSCodeKaotoEditorChannelApi extends DefaultVsCodeKieEditorChannelAp
 		this.currentEditedDocument = editor.document.document;
 
 		// Dispose watcher when the webview/editor is closed
-		editor.setupPanelOnDidDispose();
 		editor.panel.onDidDispose(() => {
 			StepsOnSaveManager.instance.disposeFor(this.currentEditedDocument.uri);
 		});

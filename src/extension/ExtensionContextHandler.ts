@@ -53,6 +53,7 @@ import { CamelRunSourceDirJBangTask } from '../tasks/CamelRunSourceDirJBangTask'
 import { Folder } from '../views/integrationTreeItems/Folder';
 import { TestsProvider } from '../views/providers/TestsProvider';
 import { AbstractFolderTreeProvider } from 'src/views/providers/AbstractFolderTreeProvider';
+import { AIAgentService } from '../services/AIAgentService';
 
 export class ExtensionContextHandler {
 	protected kieEditorStore: KogitoVsCode.VsCodeKieEditorStore;
@@ -226,6 +227,132 @@ export class ExtensionContextHandler {
 
 	public registerHelpAndFeedbackView() {
 		this.context.subscriptions.push(vscode.window.registerTreeDataProvider('kaoto.help', new HelpFeedbackProvider(this.context.extensionUri.path)));
+	}
+
+	public registerAIChatToggle() {
+		const TOGGLE_AI_CHAT_COMMAND_ID: string = 'kaoto.ai.toggleChat';
+		const aiService = new AIAgentService();
+		const registeredPanels = new WeakSet<vscode.WebviewPanel>();
+
+		this.context.subscriptions.push(
+			vscode.commands.registerCommand(TOGGLE_AI_CHAT_COMMAND_ID, async () => {
+				if (this.kieEditorStore.activeEditor !== undefined) {
+					const panel = this.kieEditorStore.activeEditor.panel;
+					void panel.webview.postMessage({ type: 'toggleAIChat' });
+
+					if (!registeredPanels.has(panel)) {
+						registeredPanels.add(panel);
+						this.registerAIMessageHandler(panel, aiService);
+					}
+				}
+			}),
+		);
+	}
+
+	private static readonly AI_REQUEST_TIMEOUT_MS = 10000;
+
+	private registerAIMessageHandler(panel: vscode.WebviewPanel, aiService: AIAgentService) {
+		let currentCancellationTokenSource: vscode.CancellationTokenSource | undefined;
+		let messageCount = 0;
+
+		KaotoOutputChannel.logInfo('[AI] Registering AI message handler on panel');
+		void vscode.window.showInformationMessage('[Kaoto AI] Handler registered on panel');
+
+		const disposable = panel.webview.onDidReceiveMessage(async (message: Record<string, unknown>) => {
+			messageCount++;
+			if (messageCount <= 5) {
+				KaotoOutputChannel.logInfo(`[AI] onDidReceiveMessage #${messageCount}: ${JSON.stringify(message).substring(0, 200)}`);
+			}
+
+			if (message.type === 'aiChatRequest') {
+				const prompt = message.prompt as string;
+				const routeYAML = message.routeYAML as string | undefined;
+				const requestId = message.requestId as string;
+
+				KaotoOutputChannel.logInfo(`[AI] Received AI chat request: ${requestId}`);
+				void vscode.window.showInformationMessage(`[Kaoto AI] Got request: ${requestId}`);
+
+				let result: { success: boolean; content?: string; error?: string };
+				try {
+					result = await this.handleAIChatRequest(aiService, prompt, routeYAML, currentCancellationTokenSource, (cts) => {
+						currentCancellationTokenSource = cts;
+					});
+				} catch (err) {
+					KaotoOutputChannel.logError('[AI] AI chat request failed', err);
+					result = {
+						success: false,
+						error: `AI request failed: ${err instanceof Error ? err.message : String(err)}`,
+					};
+				}
+
+				KaotoOutputChannel.logInfo(`[AI] Sending AI response: success=${result.success}`);
+				void panel.webview.postMessage({
+					type: 'aiChatResponse',
+					requestId,
+					result,
+				});
+			}
+		});
+
+		void panel.webview.postMessage({ type: 'aiPing' });
+		KaotoOutputChannel.logInfo('[AI] Sent aiPing to webview');
+
+		panel.onDidDispose(() => {
+			disposable.dispose();
+			currentCancellationTokenSource?.cancel();
+			currentCancellationTokenSource?.dispose();
+		});
+	}
+
+	private async handleAIChatRequest(
+		aiService: AIAgentService,
+		prompt: string,
+		currentRouteYAML: string | undefined,
+		currentCancellationTokenSource: vscode.CancellationTokenSource | undefined,
+		setCancellationTokenSource: (cts: vscode.CancellationTokenSource) => void,
+	): Promise<{ success: boolean; responseType?: string; content?: string; error?: string }> {
+		const aiEnabled = vscode.workspace.getConfiguration('kaoto').get<boolean>('ai.enabled', true);
+		if (!aiEnabled) {
+			return {
+				success: false,
+				error: 'AI features are disabled. Enable them in settings: kaoto.ai.enabled',
+			};
+		}
+
+		const availability = await aiService.checkAvailability();
+		if (!availability.available) {
+			return {
+				success: false,
+				error: availability.reason ?? 'No language model available.',
+			};
+		}
+
+		currentCancellationTokenSource?.cancel();
+		currentCancellationTokenSource?.dispose();
+		const cts = new vscode.CancellationTokenSource();
+		setCancellationTokenSource(cts);
+
+		const timeoutHandle = setTimeout(() => {
+			cts.cancel();
+		}, ExtensionContextHandler.AI_REQUEST_TIMEOUT_MS);
+
+		try {
+			const result = await Promise.race([
+				aiService.sendRequest(prompt, currentRouteYAML, (_chunk: string) => {}, cts.token),
+				new Promise<{ success: boolean; responseType: string; error: string }>((resolve) => {
+					setTimeout(() => {
+						resolve({
+							success: false,
+							responseType: 'text',
+							error: 'Request timed out. Please check that your LM provider (e.g. GitHub Copilot) is signed in and working.',
+						});
+					}, ExtensionContextHandler.AI_REQUEST_TIMEOUT_MS + 1000);
+				}),
+			]);
+			return result;
+		} finally {
+			clearTimeout(timeoutHandle);
+		}
 	}
 
 	public registerIntegrationsView() {

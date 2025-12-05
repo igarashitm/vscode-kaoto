@@ -25,7 +25,8 @@ import { Editor, KogitoEditorEnvelopeContext, KogitoEditorEnvelopeContextType } 
 import { EditorEnvelopeView, EditorEnvelopeViewApi } from '@kie-tools-core/editor/dist/envelope/EditorEnvelopeView';
 import { EditorEnvelopeI18nContext, editorEnvelopeI18nDefaults, editorEnvelopeI18nDictionaries } from '@kie-tools-core/editor/dist/envelope/i18n';
 import { I18nDictionariesProvider } from '@kie-tools-core/i18n/dist/react-components';
-import { createRef, FunctionComponent, RefObject, useCallback } from 'react';
+import { createRef, FunctionComponent, RefObject, useCallback, useState, useEffect, useRef } from 'react';
+import { AIChatPanel } from '../components/AIChat';
 
 interface KogitoEditorEnvelopeAppProps {
 	callback: (ref: RefObject<EditorEnvelopeViewApi<Editor> | null>) => void;
@@ -40,13 +41,122 @@ export const KogitoEditorEnvelopeApp: FunctionComponent<KogitoEditorEnvelopeAppP
 	showKeyBindingsOverlay,
 }: KogitoEditorEnvelopeAppProps) => {
 	const editorEnvelopeViewRef = createRef<EditorEnvelopeViewApi<Editor>>();
+	const [isChatOpen, setIsChatOpen] = useState(false);
+	const [isAIResponding, setIsAIResponding] = useState(false);
+	const [aiMessages, setAIMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string; error?: string; applied?: boolean }>>([]);
+	const vscodeApiRef = useRef<{ postMessage(message: unknown): void } | null>(null);
 
 	const onMountFn = useCallback(() => {
 		callback(editorEnvelopeViewRef);
 	}, []);
 
+	useEffect(() => {
+		if (!vscodeApiRef.current) {
+			if ((window as any).vscode) {
+				console.log('[AI] VS Code API found on window.vscode');
+				vscodeApiRef.current = (window as any).vscode;
+			} else if (typeof (window as any).acquireVsCodeApi === 'function') {
+				try {
+					vscodeApiRef.current = (window as any).acquireVsCodeApi();
+					(window as any).vscode = vscodeApiRef.current;
+					console.log('[AI] VS Code API acquired via acquireVsCodeApi');
+				} catch (error) {
+					console.error('[AI] Failed to acquire VS Code API:', error);
+				}
+			} else {
+				console.error('[AI] No VS Code API available');
+			}
+		}
+	}, []);
+
+	useEffect(() => {
+		const handleMessage = (event: MessageEvent) => {
+			const msgType = event.data?.type;
+			if (msgType === 'toggleAIChat' || msgType === 'aiChatResponse' || msgType === 'aiPing') {
+				console.log(`[AI] Received message: type=${msgType}`, event.data);
+			}
+			if (msgType === 'toggleAIChat') {
+				setIsChatOpen((prev) => !prev);
+			} else if (msgType === 'aiPing') {
+				console.log('[AI] Received aiPing, sending aiPong back');
+				vscodeApiRef.current?.postMessage({ type: 'aiPong' });
+			} else if (msgType === 'aiChatResponse') {
+				const result = event.data.result;
+				if (result.success && result.content) {
+					if (result.responseType === 'yaml') {
+						const editor = editorEnvelopeViewRef.current?.getEditor();
+						if (editor && typeof (editor as any).setContent === 'function') {
+							(editor as any).setContent('', result.content).catch((err: unknown) => {
+								console.error('[AI] Failed to apply AI response to editor:', err);
+							});
+						}
+						setAIMessages((prev) => [...prev, { role: 'assistant', content: result.content!, applied: true }]);
+					} else {
+						setAIMessages((prev) => [...prev, { role: 'assistant', content: result.content! }]);
+					}
+				} else {
+					setAIMessages((prev) => [...prev, { role: 'assistant', content: '', error: result.error || 'Unknown error' }]);
+				}
+				setIsAIResponding(false);
+			}
+		};
+
+		window.addEventListener('message', handleMessage);
+		return () => window.removeEventListener('message', handleMessage);
+	}, []);
+
+	const handleSendMessage = async (message: string, routeYAML?: string) => {
+		setAIMessages((prev) => [...prev, { role: 'user', content: message }]);
+		setIsAIResponding(true);
+
+		const vscodeApi = vscodeApiRef.current;
+		if (vscodeApi) {
+			const requestId = `ai-request-${Date.now()}`;
+			console.log(`[AI] Sending aiChatRequest: requestId=${requestId}, hasVscodeApi=true`);
+			vscodeApi.postMessage({
+				type: 'aiChatRequest',
+				requestId,
+				prompt: message,
+				routeYAML,
+			});
+		} else {
+			console.error('[AI] VS Code API not available, cannot send message');
+			setAIMessages((prev) => [...prev, { role: 'assistant', content: '', error: 'VS Code API not available' }]);
+			setIsAIResponding(false);
+		}
+	};
+
+	const handleAcceptSuggestion = async (messageId: string, content: string) => {
+		try {
+			const editor = editorEnvelopeViewRef.current?.getEditor();
+			if (editor && typeof (editor as any).setContent === 'function') {
+				await (editor as any).setContent('', content);
+			}
+		} catch (error) {
+			console.error('Failed to apply AI suggestion:', error);
+		}
+	};
+
+	const handleRejectSuggestion = (messageId: string) => {
+		console.log('AI suggestion rejected:', messageId);
+	};
+
+	const getCurrentRouteYAML = async (): Promise<string | undefined> => {
+		try {
+			const editor = editorEnvelopeViewRef.current?.getEditor();
+			if (editor && typeof (editor as any).getContent === 'function') {
+				return await (editor as any).getContent();
+			}
+		} catch (error) {
+			console.error('Failed to get current route content:', error);
+		}
+		return undefined;
+	};
+
+	const latestAIResponse = aiMessages.length > 0 ? aiMessages[aiMessages.length - 1] : undefined;
+
 	return (
-		<div ref={onMountFn}>
+		<div ref={onMountFn} style={{ height: '100vh', width: '100%' }}>
 			<KogitoEditorEnvelopeContext.Provider value={context}>
 				<I18nDictionariesProvider
 					defaults={editorEnvelopeI18nDefaults}
@@ -56,7 +166,38 @@ export const KogitoEditorEnvelopeApp: FunctionComponent<KogitoEditorEnvelopeAppP
 				>
 					<EditorEnvelopeI18nContext.Consumer>
 						{({ setLocale }) => (
-							<EditorEnvelopeView ref={editorEnvelopeViewRef} setLocale={setLocale} showKeyBindingsOverlay={showKeyBindingsOverlay} />
+							<div style={{ display: 'flex', height: '100%', width: '100%' }}>
+								<div className="kaoto-editor-container" style={{ flex: 1, overflow: 'hidden', minWidth: 0, position: 'relative', height: '100%' }}>
+									<EditorEnvelopeView ref={editorEnvelopeViewRef} setLocale={setLocale} showKeyBindingsOverlay={showKeyBindingsOverlay} />
+								</div>
+								{isChatOpen && (
+									<div
+										style={{
+											width: '400px',
+											minWidth: '300px',
+											backgroundColor: 'var(--vscode-sideBar-background)',
+											borderLeft: '1px solid var(--vscode-sideBar-border)',
+											display: 'flex',
+											flexDirection: 'column',
+										}}
+									>
+										<AIChatPanel
+											isOpen={isChatOpen}
+											onClose={() => setIsChatOpen(false)}
+											onSendMessage={handleSendMessage}
+											onAcceptSuggestion={handleAcceptSuggestion}
+											onRejectSuggestion={handleRejectSuggestion}
+											getCurrentRouteYAML={getCurrentRouteYAML}
+											aiResponse={
+												latestAIResponse
+													? { content: latestAIResponse.content, error: latestAIResponse.error, applied: latestAIResponse.applied }
+													: undefined
+											}
+											isResponding={isAIResponding}
+										/>
+									</div>
+								)}
+							</div>
 						)}
 					</EditorEnvelopeI18nContext.Consumer>
 				</I18nDictionariesProvider>

@@ -1,0 +1,53 @@
+.kaoto-editor-container > div {
+	width: 100% !important;
+	height: 100% !important;
+}
+
+.kaoto-editor-container .kie-tools--loading-screen {
+	width: 100% !important;
+	height: 100% !important;
+}
+
+.chat-container {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 1rem;
+}
+
+.chat-messages {
+	flex: 1;
+	overflow-y: auto;
+	margin-bottom: 1rem;
+	min-height: 0;
+}
+
+.chat-input-container {
+	flex-shrink: 0;
+	border-top: 1px solid var(--pf-v5-global--BorderColor--100);
+	padding-top: 1rem;
+}
+
+.chat-user-label {
+	font-weight: bold;
+	color: var(--pf-v5-global--primary-color--100);
+}
+
+.chat-assistant-label {
+	font-weight: bold;
+	color: var(--pf-v5-global--success-color--100);
+}
+
+.chat-error-message {
+	color: var(--pf-v5-global--danger-color--100);
+}
+
+.chat-accepted-label {
+	color: var(--pf-v5-global--success-color--100);
+	font-size: var(--pf-v5-global--FontSize--sm);
+}
+
+.chat-rejected-label {
+	color: var(--pf-v5-global--danger-color--100);
+	font-size: var(--pf-v5-global--FontSize--sm);
+}

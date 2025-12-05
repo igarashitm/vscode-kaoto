@@ -64,6 +64,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	contextHandler.registerOpenWithKaoto();
 
 	/*
+	 * register AI chat toggle command
+	 */
+	contextHandler.registerAIChatToggle();
+
+	/*
 	 * register 'Integrations' view provider
 	 */
 	contextHandler.registerIntegrationsView();

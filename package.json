@@ -445,6 +445,13 @@
         "title": "Delete",
         "category": "Kaoto",
         "icon": "$(trash)"
+      },
+      {
+        "command": "kaoto.ai.toggleChat",
+        "title": "Toggle AI Assistant",
+        "category": "Kaoto",
+        "enablement": "activeCustomEditorId == webviewEditorsKaoto",
+        "icon": "$(sparkle)"
       }
     ],
     "keybindings": [
@@ -470,6 +477,12 @@
         "command": "kaoto.redo",
         "key": "ctrl+y",
         "mac": "cmd+shift+z",
+        "when": "activeCustomEditorId == webviewEditorsKaoto"
+      },
+      {
+        "command": "kaoto.ai.toggleChat",
+        "key": "ctrl+alt+a",
+        "mac": "cmd+alt+a",
         "when": "activeCustomEditorId == webviewEditorsKaoto"
       }
     ],
@@ -608,6 +621,11 @@
           "command": "kaoto.close.source",
           "when": "(resourceFilename =~ /\\.(camel|kamelet|pipe).yaml$/ || resourceFilename =~ /\\-pipe.yaml$/ || resourceFilename =~ /\\.camel.xml$/) && activeCustomEditorId !== webviewEditorsKaoto",
           "group": "navigation@1"
+        },
+        {
+          "command": "kaoto.ai.toggleChat",
+          "when": "activeCustomEditorId == webviewEditorsKaoto",
+          "group": "navigation@2"
         }
       ],
       "explorer/context": [
@@ -951,6 +969,18 @@
               "--dev"
             ],
             "order": 5
+          }
+        }
+      },
+      {
+        "id": "ai",
+        "title": "AI Assistant",
+        "properties": {
+          "kaoto.ai.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Enable AI assistant features in Kaoto editor.",
+            "scope": "window"
           }
         }
       },
